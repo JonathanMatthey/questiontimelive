@@ -76,8 +76,11 @@ export default function HomePage() {
 
       <main>
         {/* Hero Section */}
-        <section className="py-20 md:py-28">
-          <div className="container mx-auto px-4">
+        <section className="relative overflow-hidden py-20 md:py-28">
+          <div className="absolute inset-0 hero-questions-bg" aria-hidden="true" />
+          <div className="absolute inset-0 bg-white/70 backdrop-blur-[1px]" aria-hidden="true" />
+
+          <div className="relative container mx-auto px-4">
             <motion.div
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}

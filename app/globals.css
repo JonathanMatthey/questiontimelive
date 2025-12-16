@@ -86,3 +86,12 @@
   outline: 2px solid hsl(var(--primary));
   outline-offset: 2px;
 }
+
+/* Landing hero background */
+.hero-questions-bg {
+  background-image: url("/images/hero-questions.jpg");
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+  filter: saturate(1.05);
+}
