@@ -91,16 +91,9 @@ export function VideoPlayer({
     fetchToken();
   }, [sessionId, role, shouldUseLivekit]);
 
-  const handleConnected = useCallback(async (room: Room) => {
-    if (role !== "host") return;
-
-    try {
-      await room.localParticipant.setCameraEnabled(true);
-      await room.localParticipant.setMicrophoneEnabled(true);
-    } catch (error) {
-      console.error("Failed to enable camera or microphone", error);
-    }
-  }, [role]);
+  const handleConnected = useCallback(() => {
+    // Connection established
+  }, []);
 
   const livekitContent = useMemo(() => {
     if (!shouldUseLivekit) return null;

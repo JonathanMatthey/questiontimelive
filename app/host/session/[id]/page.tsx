@@ -19,7 +19,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { QuestionCard } from "@/components/host/question-card";
 import { StatsBar } from "@/components/host/stats-bar";
-import { VideoPlayer } from "@/components/viewer/video-player";
+import { HostVideoPublisher } from "@/components/host/host-video-publisher";
 import { useAppStore } from "@/lib/store";
 import { formatCurrency } from "@/lib/utils";
 import type { QuestionSortOption, Session } from "@/lib/types";
@@ -167,21 +167,15 @@ useEffect(() => {
 
       <main className="container mx-auto px-4 py-8">
         <div className="mb-6 grid grid-cols-1 lg:grid-cols-2 gap-4">
-          <VideoPlayer
+          <HostVideoPublisher
             sessionId={session.id}
-            streamUrl={session.streamUrl}
+            hostNumber={1}
             sessionTitle={session.title}
-            role="host"
-            participantIdentity={`${session.id}-host-1`}
-            label="Host 1"
           />
-          <VideoPlayer
+          <HostVideoPublisher
             sessionId={session.id}
-            streamUrl={session.streamUrl}
+            hostNumber={2}
             sessionTitle={session.title}
-            role="host"
-            participantIdentity={`${session.id}-host-2`}
-            label="Host 2"
           />
         </div>
 

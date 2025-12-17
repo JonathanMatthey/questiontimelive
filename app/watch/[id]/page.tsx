@@ -6,7 +6,7 @@ import { Radio, Users, Clock, DollarSign } from "lucide-react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { Badge } from "@/components/ui/badge";
-import { VideoPlayer } from "@/components/viewer/video-player";
+import { DualHostViewer } from "@/components/viewer/dual-host-viewer";
 import { QuestionForm } from "@/components/viewer/question-form";
 import { QuestionsList } from "@/components/viewer/questions-list";
 import { useAppStore } from "@/lib/store";
@@ -128,11 +128,9 @@ export default function WatchPage() {
         {/* Main content grid */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           <div className="lg:col-span-2 space-y-6">
-            <VideoPlayer
-              streamUrl={session.streamUrl}
-              sessionTitle={session.title}
+            <DualHostViewer
               sessionId={session.id}
-              role="viewer"
+              sessionTitle={session.title}
             />
 
             <div className="lg:hidden">
