@@ -33,6 +33,7 @@ const memoryStore: {
   sessionQuestions: Map<string, Set<string>>;
   sessionPayments: Map<string, Set<string>>;
   questionPayments: Map<string, string>;
+  viewerCounts: Map<string, number>;
 } = {
   sessions: new Map(),
   questions: new Map(),
@@ -40,6 +41,7 @@ const memoryStore: {
   sessionQuestions: new Map(),
   sessionPayments: new Map(),
   questionPayments: new Map(),
+  viewerCounts: new Map(),
 };
 
 // Key prefixes
