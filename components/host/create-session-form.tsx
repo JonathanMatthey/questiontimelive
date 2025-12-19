@@ -1,8 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { motion } from "framer-motion";
-import { Plus, Wallet, DollarSign, Video, FileText } from "lucide-react";
+import { Plus, Wallet, DollarSign, Video, FileText, Loader2 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -10,6 +10,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useAppStore } from "@/lib/store";
 import { parseWalletAddress, isValidWalletAddress } from "@/lib/utils";
+import type { WalletAddressInfo } from "@/lib/types";
 
 export function CreateSessionForm() {
   const router = useRouter();
@@ -23,6 +24,47 @@ export function CreateSessionForm() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [submitError, setSubmitError] = useState<string | null>(null);
+  const [walletInfo, setWalletInfo] = useState<WalletAddressInfo | null>(null);
+  const [isFetchingWalletInfo, setIsFetchingWalletInfo] = useState(false);
+
+  // Fetch wallet info when wallet address changes
+  const fetchWalletInfo = useCallback(async (address: string) => {
+    if (!address.trim() || !isValidWalletAddress(address)) {
+      setWalletInfo(null);
+      return;
+    }
+
+    setIsFetchingWalletInfo(true);
+    try {
+      const parsedAddress = parseWalletAddress(address);
+      const response = await fetch(`/api/wallet-info?address=${encodeURIComponent(parsedAddress)}`);
+      
+      if (response.ok) {
+        const info = await response.json();
+        setWalletInfo(info);
+      } else {
+        setWalletInfo(null);
+      }
+    } catch (error) {
+      console.error("Failed to fetch wallet info:", error);
+      setWalletInfo(null);
+    } finally {
+      setIsFetchingWalletInfo(false);
+    }
+  }, []);
+
+  // Debounce wallet info fetching
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      if (walletAddress.trim()) {
+        fetchWalletInfo(walletAddress);
+      } else {
+        setWalletInfo(null);
+      }
+    }, 500); // Wait 500ms after user stops typing
+
+    return () => clearTimeout(timer);
+  }, [walletAddress, fetchWalletInfo]);
 
   const validate = () => {
     const newErrors: Record<string, string> = {};
@@ -38,12 +80,23 @@ export function CreateSessionForm() {
     }
 
     const price = parseFloat(questionPrice);
-    if (isNaN(price) || price < 0.01) {
-      newErrors.questionPrice = "Price must be at least $0.01";
+    const minPrice = walletInfo ? Math.pow(10, -walletInfo.assetScale) : 0.01;
+    if (isNaN(price) || price < minPrice) {
+      const currencySymbol = walletInfo?.assetCode || "USD";
+      newErrors.questionPrice = `Price must be at least ${formatCurrencyValue(minPrice, walletInfo?.assetCode || "USD", walletInfo?.assetScale || 2)}`;
     }
 
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
+  };
+
+  const formatCurrencyValue = (value: number, assetCode: string, assetScale: number): string => {
+    return new Intl.NumberFormat("en-US", {
+      style: "currency",
+      currency: assetCode,
+      minimumFractionDigits: assetScale,
+      maximumFractionDigits: assetScale,
+    }).format(value);
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -58,6 +111,12 @@ export function CreateSessionForm() {
       const parsedWalletAddress = parseWalletAddress(walletAddress);
       setHostWalletAddress(parsedWalletAddress);
 
+      // Convert question price to smallest unit using the wallet's asset scale
+      const priceValue = parseFloat(questionPrice);
+      const assetScale = walletInfo?.assetScale || 2;
+      const assetCode = walletInfo?.assetCode || "USD";
+      const questionPriceInSmallestUnit = Math.round(priceValue * Math.pow(10, assetScale));
+
       // Create session via API (server-side storage)
       const response = await fetch("/api/sessions", {
         method: "POST",
@@ -66,9 +125,9 @@ export function CreateSessionForm() {
           title: title.trim(),
           description: description.trim(),
           hostWalletAddress: parsedWalletAddress,
-          questionPrice: Math.round(parseFloat(questionPrice) * 100),
-          assetCode: "USD",
-          assetScale: 2,
+          questionPrice: questionPriceInSmallestUnit,
+          assetCode: assetCode,
+          assetScale: assetScale,
           streamUrl: streamUrl.trim() || undefined,
         }),
       });
@@ -185,28 +244,66 @@ export function CreateSessionForm() {
             <div className="space-y-2">
               <label className="text-sm font-medium text-foreground flex items-center gap-2">
                 <DollarSign className="w-4 h-4 text-primary" />
-                Price per question (USD)
+                Price per question
+                {walletInfo && (
+                  <span className="text-xs text-muted-foreground font-normal">
+                    ({walletInfo.assetCode})
+                  </span>
+                )}
               </label>
               <div className="relative">
-                <span className="absolute left-4 top-1/2 -translate-y-1/2 text-muted-foreground">
-                  $
-                </span>
+                {walletInfo && (
+                  <span className="absolute left-4 top-1/2 -translate-y-1/2 text-muted-foreground">
+                    {(() => {
+                      try {
+                        const formatter = new Intl.NumberFormat("en-US", {
+                          style: "currency",
+                          currency: walletInfo.assetCode,
+                          minimumFractionDigits: 0,
+                          maximumFractionDigits: 0,
+                        });
+                        return formatter.format(0).replace(/[\d.,\s]/g, "").trim() || walletInfo.assetCode;
+                      } catch {
+                        return walletInfo.assetCode;
+                      }
+                    })()}
+                  </span>
+                )}
+                {!walletInfo && (
+                  <span className="absolute left-4 top-1/2 -translate-y-1/2 text-muted-foreground">
+                    $
+                  </span>
+                )}
                 <Input
                   type="number"
-                  min="0.01"
-                  step="0.01"
-                  placeholder="0.01"
+                  min={walletInfo ? Math.pow(10, -walletInfo.assetScale).toFixed(walletInfo.assetScale) : "0.01"}
+                  step={walletInfo ? Math.pow(10, -walletInfo.assetScale).toFixed(walletInfo.assetScale) : "0.01"}
+                  placeholder={walletInfo ? formatCurrencyValue(Math.pow(10, -walletInfo.assetScale), walletInfo.assetCode, walletInfo.assetScale) : "0.01"}
                   value={questionPrice}
                   onChange={(e) => setQuestionPrice(e.target.value)}
                   className={`pl-8 ${errors.questionPrice ? "border-destructive" : ""}`}
+                  disabled={isFetchingWalletInfo}
                 />
               </div>
+              {isFetchingWalletInfo && (
+                <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                  <Loader2 className="w-3 h-3 animate-spin" />
+                  Detecting wallet currency...
+                </div>
+              )}
+              {walletInfo && !isFetchingWalletInfo && (
+                <p className="text-xs text-muted-foreground">
+                  Wallet currency: <span className="font-medium">{walletInfo.assetCode}</span> (scale: {walletInfo.assetScale})
+                </p>
+              )}
               {errors.questionPrice && (
                 <p className="text-xs text-destructive">{errors.questionPrice}</p>
               )}
-              <p className="text-xs text-muted-foreground">
-                Micropayments as low as $0.01 are supported.
-              </p>
+              {!walletInfo && !isFetchingWalletInfo && (
+                <p className="text-xs text-muted-foreground">
+                  Enter wallet address to detect currency.
+                </p>
+              )}
             </div>
 
             {/* Stream URL */}
