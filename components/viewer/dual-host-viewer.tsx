@@ -6,6 +6,7 @@ import { Radio, VideoOff } from "lucide-react";
 import {
   LiveKitRoom,
   VideoTrack,
+  AudioTrack,
   useTracks,
   TrackLoop,
 } from "@livekit/components-react";
@@ -18,17 +19,29 @@ interface DualHostViewerProps {
 }
 
 function HostStreams() {
-  const tracks = useTracks(
+  const videoTracks = useTracks(
     [
       { source: Track.Source.Camera, withPlaceholder: false },
     ],
     { onlySubscribed: true }
   );
+  const audioTracks = useTracks(
+    [
+      { source: Track.Source.Microphone, withPlaceholder: false },
+    ],
+    { onlySubscribed: true }
+  );
 
-  const host1Track = tracks.find((track) =>
+  const host1VideoTrack = videoTracks.find((track) =>
     track.participant.identity.includes("-host-1") && track.publication
   );
-  const host2Track = tracks.find((track) =>
+  const host2VideoTrack = videoTracks.find((track) =>
+    track.participant.identity.includes("-host-2") && track.publication
+  );
+  const host1AudioTrack = audioTracks.find((track) =>
+    track.participant.identity.includes("-host-1") && track.publication
+  );
+  const host2AudioTrack = audioTracks.find((track) =>
     track.participant.identity.includes("-host-2") && track.publication
   );
 
@@ -36,12 +49,15 @@ function HostStreams() {
     <div className="grid grid-cols-1 md:grid-cols-2 gap-4 h-full">
       {/* Host 1 Stream */}
       <div className="relative aspect-video bg-black rounded-lg overflow-hidden">
-        {host1Track && host1Track.publication ? (
+        {host1VideoTrack && host1VideoTrack.publication ? (
           <>
             <VideoTrack
-              trackRef={host1Track as any}
+              trackRef={host1VideoTrack as any}
               className="absolute inset-0 w-full h-full object-cover"
             />
+            {host1AudioTrack && host1AudioTrack.publication && (
+              <AudioTrack trackRef={host1AudioTrack as any} />
+            )}
             <div className="absolute top-3 left-3 bg-white/90 backdrop-blur-sm text-xs font-semibold text-foreground px-3 py-1 rounded-full shadow-sm">
               Host 1
             </div>
@@ -58,12 +74,15 @@ function HostStreams() {
 
       {/* Host 2 Stream */}
       <div className="relative aspect-video bg-black rounded-lg overflow-hidden">
-        {host2Track && host2Track.publication ? (
+        {host2VideoTrack && host2VideoTrack.publication ? (
           <>
             <VideoTrack
-              trackRef={host2Track as any}
+              trackRef={host2VideoTrack as any}
               className="absolute inset-0 w-full h-full object-cover"
             />
+            {host2AudioTrack && host2AudioTrack.publication && (
+              <AudioTrack trackRef={host2AudioTrack as any} />
+            )}
             <div className="absolute top-3 left-3 bg-white/90 backdrop-blur-sm text-xs font-semibold text-foreground px-3 py-1 rounded-full shadow-sm">
               Host 2
             </div>

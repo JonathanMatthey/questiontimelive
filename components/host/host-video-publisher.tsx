@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { motion } from "framer-motion";
 import { Video, VideoOff, Mic, MicOff, Radio } from "lucide-react";
-import { LiveKitRoom, useLocalParticipant, VideoTrack, useTracks } from "@livekit/components-react";
+import { LiveKitRoom, useLocalParticipant, VideoTrack, AudioTrack, useTracks } from "@livekit/components-react";
 import { Track, Room } from "livekit-client";
 import { Button } from "@/components/ui/button";
 import "@livekit/components-styles";
@@ -16,25 +16,37 @@ interface HostVideoPublisherProps {
 }
 
 function HostViewer({ hostNumber }: { hostNumber: number }) {
-  // Subscribe to the specific host's video track
-  const tracks = useTracks(
+  // Subscribe to the specific host's video and audio tracks
+  const videoTracks = useTracks(
     [{ source: Track.Source.Camera, withPlaceholder: false }],
     { onlySubscribed: true }
   );
+  const audioTracks = useTracks(
+    [{ source: Track.Source.Microphone, withPlaceholder: false }],
+    { onlySubscribed: true }
+  );
 
-  const hostTrack = tracks.find(
+  const hostVideoTrack = videoTracks.find(
+    (track) =>
+      track.participant.identity.includes(`-host-${hostNumber}`) &&
+      track.publication
+  );
+  const hostAudioTrack = audioTracks.find(
     (track) =>
       track.participant.identity.includes(`-host-${hostNumber}`) &&
       track.publication
   );
 
-  if (hostTrack && hostTrack.publication) {
+  if (hostVideoTrack && hostVideoTrack.publication) {
     return (
       <>
         <VideoTrack
-          trackRef={hostTrack as any}
+          trackRef={hostVideoTrack as any}
           className="absolute inset-0 w-full h-full object-cover"
         />
+        {hostAudioTrack && hostAudioTrack.publication && (
+          <AudioTrack trackRef={hostAudioTrack as any} />
+        )}
         <div className="absolute top-4 left-4 flex items-center gap-2 bg-black/50 backdrop-blur-sm rounded-full px-3 py-1.5">
           <span className="w-2 h-2 bg-red-500 rounded-full live-pulse" />
           <span className="text-xs font-semibold text-white">LIVE</span>
@@ -327,7 +339,7 @@ export function HostVideoPublisher({
         serverUrl={livekitServerUrl}
         connect={Boolean(livekitToken)}
         video={isCurrentUser}
-        audio={isCurrentUser}
+        audio={true}
         connectOptions={{ autoSubscribe: true }}
         onConnected={handleConnected}
         data-lk-theme="default"

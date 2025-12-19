@@ -6,6 +6,7 @@ import { Radio, VideoOff } from "lucide-react";
 import {
   LiveKitRoom,
   VideoTrack,
+  AudioTrack,
   useTracks,
 } from "@livekit/components-react";
 import { Track } from "livekit-client";
@@ -17,14 +18,25 @@ interface MultiHostViewerProps {
 }
 
 function HostStreams() {
-  const tracks = useTracks(
+  const videoTracks = useTracks(
     [{ source: Track.Source.Camera, withPlaceholder: false }],
+    { onlySubscribed: true }
+  );
+  const audioTracks = useTracks(
+    [{ source: Track.Source.Microphone, withPlaceholder: false }],
     { onlySubscribed: true }
   );
 
   // Find tracks for each host
-  const hostTracks = [1, 2, 3, 4].map((hostNum) => {
-    return tracks.find(
+  const hostVideoTracks = [1, 2, 3, 4].map((hostNum) => {
+    return videoTracks.find(
+      (track) =>
+        track.participant.identity.includes(`-host-${hostNum}`) &&
+        track.publication
+    );
+  });
+  const hostAudioTracks = [1, 2, 3, 4].map((hostNum) => {
+    return audioTracks.find(
       (track) =>
         track.participant.identity.includes(`-host-${hostNum}`) &&
         track.publication
@@ -32,7 +44,7 @@ function HostStreams() {
   });
 
   // Count active hosts to determine grid layout
-  const activeHostCount = hostTracks.filter((t) => t?.publication).length;
+  const activeHostCount = hostVideoTracks.filter((t) => t?.publication).length;
 
   // Determine grid classes based on active hosts
   const getGridClasses = () => {
@@ -43,13 +55,14 @@ function HostStreams() {
 
   return (
     <div className={`grid ${getGridClasses()} gap-4 h-full`}>
-      {hostTracks.map((hostTrack, index) => {
+      {hostVideoTracks.map((hostVideoTrack, index) => {
         const hostNum = index + 1;
-        const hasTrack = hostTrack && hostTrack.publication;
+        const hasVideoTrack = hostVideoTrack && hostVideoTrack.publication;
+        const hostAudioTrack = hostAudioTracks[index];
 
         // Don't render slot if no host has joined and it's host 3 or 4
         // Only show host 3/4 slots if at least one of them is active
-        if (!hasTrack && hostNum > 2 && !hostTracks[2]?.publication && !hostTracks[3]?.publication) {
+        if (!hasVideoTrack && hostNum > 2 && !hostVideoTracks[2]?.publication && !hostVideoTracks[3]?.publication) {
           return null;
         }
 
@@ -58,12 +71,15 @@ function HostStreams() {
             key={hostNum}
             className="relative aspect-video bg-black rounded-lg overflow-hidden"
           >
-            {hasTrack ? (
+            {hasVideoTrack ? (
               <>
                 <VideoTrack
-                  trackRef={hostTrack as any}
+                  trackRef={hostVideoTrack as any}
                   className="absolute inset-0 w-full h-full object-cover"
                 />
+                {hostAudioTrack && hostAudioTrack.publication && (
+                  <AudioTrack trackRef={hostAudioTrack as any} />
+                )}
                 <div className="absolute top-3 left-3 bg-white/90 backdrop-blur-sm text-xs font-semibold text-foreground px-3 py-1 rounded-full shadow-sm">
                   Host {hostNum}
                 </div>
