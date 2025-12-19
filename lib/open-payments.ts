@@ -232,8 +232,8 @@ export async function createIncomingPayment(
  */
 export async function getIncomingPayment(
   paymentUrl: string,
-  accessToken: string
-): Promise<IncomingPayment> {
+  accessToken?: string
+): Promise<IncomingPayment | null> {
   // In production, this would:
   // 1. GET the payment URL
   // 2. Include the access token
@@ -245,29 +245,43 @@ export async function getIncomingPayment(
 
   console.log("Checking payment status:", paymentUrl);
 
-  // Simulate network delay
-  await new Promise((resolve) => setTimeout(resolve, 200));
+  try {
+    // Try to fetch the incoming payment URL directly
+    // For Web Monetization, these URLs should be publicly accessible
+    const response = await fetch(paymentUrl, {
+      method: "GET",
+      headers: {
+        "Accept": "application/json",
+        ...(accessToken && { "Authorization": `Bearer ${accessToken}` }),
+      },
+    });
 
-  // For demo, randomly complete payments
-  const isCompleted = Math.random() > 0.3;
+    if (!response.ok) {
+      console.warn(`Failed to fetch incoming payment: ${response.status} ${response.statusText}`);
+      return null;
+    }
 
-  return {
-    id: paymentUrl,
-    walletAddress: "https://wallet.example/host",
-    completed: isCompleted,
-    incomingAmount: {
-      value: "100",
-      assetCode: "USD",
-      assetScale: 2,
-    },
-    receivedAmount: {
-      value: isCompleted ? "100" : "0",
-      assetCode: "USD",
-      assetScale: 2,
-    },
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-  };
+    const data = await response.json();
+    
+    return {
+      id: data.id || paymentUrl,
+      walletAddress: data.walletAddress || "",
+      completed: data.completed || false,
+      incomingAmount: data.incomingAmount,
+      receivedAmount: data.receivedAmount || {
+        value: "0",
+        assetCode: data.incomingAmount?.assetCode || "USD",
+        assetScale: data.incomingAmount?.assetScale || 2,
+      },
+      expiresAt: data.expiresAt,
+      metadata: data.metadata,
+      createdAt: data.createdAt || new Date().toISOString(),
+      updatedAt: data.updatedAt || new Date().toISOString(),
+    };
+  } catch (error) {
+    console.error("Error fetching incoming payment:", error);
+    return null;
+  }
 }
 
 /**

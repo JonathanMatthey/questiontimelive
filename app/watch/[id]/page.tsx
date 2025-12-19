@@ -103,6 +103,13 @@ export default function WatchPage() {
     // The href should be a payment pointer URL
     monetizationLink.href = walletAddress;
 
+    console.log("[WEB MONETIZATION] Monetization link set up", {
+      sessionId: session?.id,
+      hostWalletAddress: walletAddress,
+      linkHref: monetizationLink.href,
+      timestamp: new Date().toISOString(),
+    });
+
     // Cleanup on unmount
     return () => {
       const link = document.querySelector('link[rel="monetization"]');

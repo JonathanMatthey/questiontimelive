@@ -22,6 +22,7 @@ export function CreateSessionForm() {
   const [streamUrl, setStreamUrl] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
+  const [submitError, setSubmitError] = useState<string | null>(null);
 
   const validate = () => {
     const newErrors: Record<string, string> = {};
@@ -47,13 +48,15 @@ export function CreateSessionForm() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setSubmitError(null);
 
     if (!validate()) return;
 
     setIsSubmitting(true);
 
     try {
-      setHostWalletAddress(parseWalletAddress(walletAddress));
+      const parsedWalletAddress = parseWalletAddress(walletAddress);
+      setHostWalletAddress(parsedWalletAddress);
 
       // Create session via API (server-side storage)
       const response = await fetch("/api/sessions", {
@@ -62,7 +65,7 @@ export function CreateSessionForm() {
         body: JSON.stringify({
           title: title.trim(),
           description: description.trim(),
-          hostWalletAddress: parseWalletAddress(walletAddress),
+          hostWalletAddress: parsedWalletAddress,
           questionPrice: Math.round(parseFloat(questionPrice) * 100),
           assetCode: "USD",
           assetScale: 2,
@@ -71,15 +74,39 @@ export function CreateSessionForm() {
       });
 
       if (!response.ok) {
-        throw new Error("Failed to create session");
+        const errorData = await response.json().catch(() => ({ error: "Failed to create session" }));
+        throw new Error(errorData.error || `Server error: ${response.status}`);
       }
 
       const session = await response.json();
-      router.push(`/host/session/${session.id}`);
+      
+      if (!session || !session.id) {
+        throw new Error("Invalid response from server - session ID missing");
+      }
+      
+      // Clear form before navigation
+      setTitle("");
+      setDescription("");
+      setQuestionPrice("0.01");
+      setStreamUrl("");
+      setSubmitError(null);
+      
+      // Navigate to the session page
+      // Use window.location as fallback if router.push fails
+      try {
+        router.push(`/host/session/${session.id}`);
+      } catch (navError) {
+        console.error("Router navigation failed, using window.location:", navError);
+        window.location.href = `/host/session/${session.id}`;
+      }
     } catch (error) {
       console.error("Failed to create session:", error);
-    } finally {
       setIsSubmitting(false);
+      setSubmitError(
+        error instanceof Error 
+          ? error.message 
+          : "Failed to create session. Please check your wallet address and try again."
+      );
     }
   };
 
@@ -97,6 +124,11 @@ export function CreateSessionForm() {
           </CardTitle>
         </CardHeader>
         <CardContent>
+          {submitError && (
+            <div className="mb-4 rounded-lg border border-destructive/20 bg-destructive/10 px-4 py-3 text-sm text-destructive">
+              {submitError}
+            </div>
+          )}
           <form onSubmit={handleSubmit} className="space-y-5">
             {/* Title */}
             <div className="space-y-2">

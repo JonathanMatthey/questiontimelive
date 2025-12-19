@@ -65,3 +65,23 @@ export interface SessionStats {
   viewerCount: number;
 }
 
+export interface GuestPayment {
+  guestId: string;
+  sessionId: string;
+  incomingPaymentUrls: string[]; // Array of incoming payment URLs from Web Monetization
+  totalReceived: number; // Total amount received (in smallest unit, e.g., cents)
+  assetCode: string;
+  assetScale: number;
+  lastUpdated: Date;
+}
+
+export interface GuestBalance {
+  guestId: string;
+  sessionId: string;
+  balance: number; // Available balance (in smallest unit)
+  totalReceived: number; // Total amount received (in smallest unit)
+  questionCredits: number; // Number of question credits available (calculated from balance / questionPrice)
+  assetCode: string;
+  assetScale: number;
+}
+

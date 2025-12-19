@@ -4,7 +4,7 @@
  * Falls back to in-memory storage when Redis is not configured (local development).
  */
 
-import type { Session, Question, Payment, CoHostToken } from "./types";
+import type { Session, Question, Payment, CoHostToken, GuestPayment, GuestBalance } from "./types";
 
 // Check if Upstash Redis is configured (supports both Vercel KV naming and Upstash naming)
 const redisUrl = process.env.KV_REST_API_URL || process.env.UPSTASH_REDIS_REST_URL;
@@ -34,6 +34,8 @@ const memoryStore: {
   sessionPayments: Map<string, Set<string>>;
   questionPayments: Map<string, string>;
   viewerCounts: Map<string, number>;
+  guestPayments: Map<string, GuestPayment>;
+  guestBalances: Map<string, number>; // guestId:sessionId -> balance
 } = {
   sessions: new Map(),
   questions: new Map(),
@@ -42,12 +44,16 @@ const memoryStore: {
   sessionPayments: new Map(),
   questionPayments: new Map(),
   viewerCounts: new Map(),
+  guestPayments: new Map(),
+  guestBalances: new Map(),
 };
 
 // Key prefixes
 const SESSIONS_KEY = "sessions";
 const QUESTIONS_KEY = "questions";
 const PAYMENTS_KEY = "payments";
+const GUEST_PAYMENTS_KEY = "guest_payments";
+const GUEST_BALANCES_KEY = "guest_balances";
 
 // Types for serialized data (dates as strings for JSON storage)
 type SerializedSession = Omit<Session, "createdAt" | "startedAt" | "endedAt"> & {
@@ -392,31 +398,381 @@ export async function decrementViewerCount(sessionId: string): Promise<number> {
   }
 }
 
+// Get all guest payments for a session
+export async function getAllGuestPaymentsBySession(sessionId: string): Promise<GuestPayment[]> {
+  const redis = await getRedis();
+  const guestPayments: GuestPayment[] = [];
+
+  if (redis) {
+      try {
+        // Scan for all guest payment keys that match the session
+        // Pattern: guest_payments:guestId:sessionId
+        // We'll use SCAN to find all keys matching the pattern
+        let cursor: string | number = 0;
+        let scanCount = 0;
+        const maxScans = 100; // Prevent infinite loops
+        
+        do {
+          const result = await redis.scan(cursor, { match: `${GUEST_PAYMENTS_KEY}:*:${sessionId}`, count: 100 });
+          cursor = result[0];
+          const keys = result[1] || [];
+          
+          if (keys.length > 0) {
+            const payments = await Promise.all(
+              keys.map(key => redis.get<SerializedGuestPayment>(key))
+            );
+            payments.forEach(payment => {
+              if (payment) {
+                const deserialized = deserializeGuestPayment(payment);
+                if (deserialized) {
+                  guestPayments.push(deserialized);
+                }
+              }
+            });
+          }
+          
+          scanCount++;
+          // Break if cursor is "0" or 0 (scan complete) or we've done too many scans
+          const cursorValue = typeof cursor === 'string' ? parseInt(cursor, 10) : cursor;
+          if (cursorValue === 0 || scanCount >= maxScans) {
+            break;
+          }
+        } while (true);
+    } catch (error) {
+      console.error("[GUEST PAYMENTS ERROR] Failed to scan guest payments", {
+        sessionId,
+        error: error instanceof Error ? error.message : String(error),
+        timestamp: new Date().toISOString(),
+      });
+      // Return empty array on error
+      return [];
+    }
+  } else {
+    // In-memory fallback - iterate through all guest payments
+    memoryStore.guestPayments.forEach((payment, key) => {
+      if (payment.sessionId === sessionId) {
+        guestPayments.push(payment);
+      }
+    });
+  }
+
+  return guestPayments;
+}
+
 // Stats
 export async function getSessionStats(sessionId: string) {
   const redis = await getRedis();
   const questions = await getQuestionsBySession(sessionId);
 
-  let payments: (Payment | null)[] = [];
-
-  if (redis) {
-    const paymentIds = await redis.smembers(`${PAYMENTS_KEY}:${sessionId}`);
-    payments = paymentIds.length
-      ? await Promise.all(paymentIds.map(id => redis.get<Payment>(`payment:${id}`)))
-      : [];
-  } else {
-    // In-memory fallback
-    const paymentIds = memoryStore.sessionPayments.get(sessionId) || new Set();
-    payments = Array.from(paymentIds).map(id => memoryStore.payments.get(id) || null);
+  // Get all guest payments for this session to calculate total earned
+  // Wrap in try-catch with timeout to prevent hanging if Redis SCAN fails
+  let totalEarned = 0;
+  try {
+    // Add timeout to prevent hanging
+    const timeoutPromise = new Promise<GuestPayment[]>((_, reject) => {
+      setTimeout(() => reject(new Error("Timeout fetching guest payments")), 5000);
+    });
+    
+    const guestPayments = await Promise.race([
+      getAllGuestPaymentsBySession(sessionId),
+      timeoutPromise,
+    ]);
+    
+    // Sum up all totalReceived amounts from guest payments
+    // These are already stored in the session's currency
+    totalEarned = guestPayments.reduce((sum, gp) => sum + gp.totalReceived, 0);
+  } catch (error) {
+    console.error("[STATS ERROR] Failed to get guest payments for session stats", {
+      sessionId,
+      error: error instanceof Error ? error.message : String(error),
+      timestamp: new Date().toISOString(),
+    });
+    // Continue with 0 earned if we can't fetch guest payments
+    totalEarned = 0;
   }
-
-  const completedPayments = payments.filter(p => p && p.status === "completed") as Payment[];
+  
   const viewerCount = await getViewerCount(sessionId);
 
   return {
     totalQuestions: questions.filter(q => q.status !== "pending_payment").length,
     answeredQuestions: questions.filter(q => q.status === "answered").length,
-    totalEarned: completedPayments.reduce((sum, p) => sum + p.amount, 0),
+    totalEarned,
     viewerCount,
   };
+}
+
+// Guest payment operations
+type SerializedGuestPayment = Omit<GuestPayment, "lastUpdated"> & {
+  lastUpdated: string;
+};
+
+function serializeGuestPayment(guestPayment: GuestPayment): SerializedGuestPayment {
+  return {
+    ...guestPayment,
+    lastUpdated: guestPayment.lastUpdated instanceof Date 
+      ? guestPayment.lastUpdated.toISOString() 
+      : String(guestPayment.lastUpdated),
+  };
+}
+
+function deserializeGuestPayment(guestPayment: SerializedGuestPayment | null): GuestPayment | null {
+  if (!guestPayment) return null;
+  return {
+    ...guestPayment,
+    lastUpdated: new Date(guestPayment.lastUpdated),
+  };
+}
+
+export async function getGuestPayment(guestId: string, sessionId: string): Promise<GuestPayment | null> {
+  const redis = await getRedis();
+  const key = `${guestId}:${sessionId}`;
+
+  if (redis) {
+    const data = await redis.get<SerializedGuestPayment>(`${GUEST_PAYMENTS_KEY}:${key}`);
+    return deserializeGuestPayment(data);
+  } else {
+    const data = memoryStore.guestPayments.get(key);
+    return data || null;
+  }
+}
+
+export async function createOrUpdateGuestPayment(
+  guestId: string,
+  sessionId: string,
+  assetCode: string,
+  assetScale: number
+): Promise<GuestPayment> {
+  const redis = await getRedis();
+  const key = `${guestId}:${sessionId}`;
+
+  const existing = await getGuestPayment(guestId, sessionId);
+  
+  const guestPayment: GuestPayment = existing || {
+    guestId,
+    sessionId,
+    incomingPaymentUrls: [],
+    totalReceived: 0,
+    assetCode,
+    assetScale,
+    lastUpdated: new Date(),
+  };
+
+  if (redis) {
+    await redis.set(`${GUEST_PAYMENTS_KEY}:${key}`, serializeGuestPayment(guestPayment));
+  } else {
+    memoryStore.guestPayments.set(key, guestPayment);
+  }
+
+  return guestPayment;
+}
+
+export async function addIncomingPaymentUrl(
+  guestId: string,
+  sessionId: string,
+  incomingPaymentUrl: string,
+  assetCode: string,
+  assetScale: number
+): Promise<GuestPayment> {
+  const redis = await getRedis();
+  const key = `${guestId}:${sessionId}`;
+
+  let guestPayment = await getGuestPayment(guestId, sessionId);
+  
+  if (!guestPayment) {
+    guestPayment = await createOrUpdateGuestPayment(guestId, sessionId, assetCode, assetScale);
+  }
+
+  // Add URL if not already present
+  if (!guestPayment.incomingPaymentUrls.includes(incomingPaymentUrl)) {
+    guestPayment.incomingPaymentUrls.push(incomingPaymentUrl);
+    guestPayment.lastUpdated = new Date();
+  }
+
+  if (redis) {
+    await redis.set(`${GUEST_PAYMENTS_KEY}:${key}`, serializeGuestPayment(guestPayment));
+  } else {
+    memoryStore.guestPayments.set(key, guestPayment);
+  }
+
+  return guestPayment;
+}
+
+export async function updateGuestBalance(
+  guestId: string,
+  sessionId: string,
+  totalReceived: number,
+  assetCode: string,
+  assetScale: number,
+  increment?: boolean // If true, add to existing total instead of replacing
+): Promise<GuestPayment> {
+  const redis = await getRedis();
+  const key = `${guestId}:${sessionId}`;
+
+  // Get session to determine the correct currency to store payments in
+  const session = await getSession(sessionId);
+  const sessionCurrency = session?.assetCode || assetCode;
+  const sessionScale = session?.assetScale ?? assetScale;
+
+  let guestPayment = await getGuestPayment(guestId, sessionId);
+  
+  if (!guestPayment) {
+    // Initialize with session currency
+    guestPayment = await createOrUpdateGuestPayment(guestId, sessionId, sessionCurrency, sessionScale);
+  }
+
+  // Convert incoming payment to session currency if needed
+  let totalReceivedInSessionCurrency = totalReceived;
+  if (assetCode !== sessionCurrency || assetScale !== sessionScale) {
+    // Convert from payment currency to session currency
+    // Step 1: Convert to display value in payment currency
+    const displayValue = totalReceived / Math.pow(10, assetScale);
+    // Step 2: Convert to session currency smallest units
+    // Note: This assumes 1:1 exchange rate - in production, you'd need real exchange rates
+    totalReceivedInSessionCurrency = Math.floor(displayValue * Math.pow(10, sessionScale));
+    
+    console.log("[BALANCE UPDATE] Converting payment currency", {
+      guestId,
+      sessionId,
+      paymentCurrency: assetCode,
+      paymentScale: assetScale,
+      paymentAmount: totalReceived,
+      sessionCurrency: sessionCurrency,
+      sessionScale: sessionScale,
+      convertedAmount: totalReceivedInSessionCurrency,
+      timestamp: new Date().toISOString(),
+    });
+  }
+
+  // If increment is true, add to existing total (for streaming payments)
+  // Otherwise, set to the new total (for polling results)
+  if (increment) {
+    // If existing payment is in different currency, convert it first
+    if (guestPayment.assetCode !== sessionCurrency || guestPayment.assetScale !== sessionScale) {
+      const existingDisplayValue = guestPayment.totalReceived / Math.pow(10, guestPayment.assetScale);
+      guestPayment.totalReceived = Math.floor(existingDisplayValue * Math.pow(10, sessionScale));
+    }
+    guestPayment.totalReceived = guestPayment.totalReceived + totalReceivedInSessionCurrency;
+  } else {
+    // Use the maximum of current and new total (in case of race conditions)
+    // Convert existing if needed
+    if (guestPayment.assetCode !== sessionCurrency || guestPayment.assetScale !== sessionScale) {
+      const existingDisplayValue = guestPayment.totalReceived / Math.pow(10, guestPayment.assetScale);
+      guestPayment.totalReceived = Math.floor(existingDisplayValue * Math.pow(10, sessionScale));
+    }
+    guestPayment.totalReceived = Math.max(guestPayment.totalReceived, totalReceivedInSessionCurrency);
+  }
+  
+  // Always store in session currency
+  guestPayment.assetCode = sessionCurrency;
+  guestPayment.assetScale = sessionScale;
+  guestPayment.lastUpdated = new Date();
+
+  if (redis) {
+    await redis.set(`${GUEST_PAYMENTS_KEY}:${key}`, serializeGuestPayment(guestPayment));
+    // Also store balance separately for quick lookup
+    await redis.set(`${GUEST_BALANCES_KEY}:${key}`, guestPayment.totalReceived);
+  } else {
+    memoryStore.guestPayments.set(key, guestPayment);
+    memoryStore.guestBalances.set(key, guestPayment.totalReceived);
+  }
+
+  return guestPayment;
+}
+
+export async function getGuestBalance(guestId: string, sessionId: string): Promise<GuestBalance | null> {
+  const redis = await getRedis();
+  const key = `${guestId}:${sessionId}`;
+
+  const guestPayment = await getGuestPayment(guestId, sessionId);
+  
+  if (!guestPayment) {
+    return null;
+  }
+
+  // Get session to get question price for credit calculation
+  const session = await getSession(sessionId);
+  if (!session) {
+    return null;
+  }
+
+  // Calculate balance: total received minus amount spent on questions
+  let balance = guestPayment.totalReceived;
+  
+  // Get all questions by this guest and count how many credits were used
+  const questions = await getQuestionsBySession(sessionId);
+  const guestQuestions = questions.filter(q => 
+    q.submitterWalletAddress === guestId || 
+    // Fallback: check if question metadata includes guestId
+    (q as any).guestId === guestId
+  );
+  
+  // Count questions submitted (each question costs 1 credit)
+  const creditsUsed = guestQuestions
+    .filter(q => q.status !== "pending_payment")
+    .length;
+  
+  // Calculate available credits: (totalReceived / questionPrice) - creditsUsed
+  // Credits are always in the host's currency (from session)
+  // totalReceived should now always be stored in session currency (enforced in updateGuestBalance)
+  const questionPrice = session.questionPrice; // Already in smallest unit of session currency
+  
+  // Convert totalReceived to session currency if there's a mismatch (safeguard)
+  let totalReceivedInSessionCurrency = guestPayment.totalReceived;
+  if (guestPayment.assetCode !== session.assetCode || guestPayment.assetScale !== session.assetScale) {
+    // Legacy data conversion - convert from payment currency to session currency
+    const totalReceivedDisplay = guestPayment.totalReceived / Math.pow(10, guestPayment.assetScale);
+    totalReceivedInSessionCurrency = Math.floor(totalReceivedDisplay * Math.pow(10, session.assetScale));
+    
+    console.log("[CREDIT CALC] Converting legacy currency data for credit calculation", {
+      guestId,
+      sessionId,
+      paymentCurrency: guestPayment.assetCode,
+      paymentScale: guestPayment.assetScale,
+      paymentTotalReceived: guestPayment.totalReceived,
+      sessionCurrency: session.assetCode,
+      sessionScale: session.assetScale,
+      convertedTotalReceived: totalReceivedInSessionCurrency,
+      questionPrice,
+      timestamp: new Date().toISOString(),
+    });
+  }
+  
+  const totalCreditsEarned = questionPrice > 0 
+    ? Math.floor(totalReceivedInSessionCurrency / questionPrice)
+    : 0;
+  const questionCredits = Math.max(0, totalCreditsEarned - creditsUsed);
+  
+  // Balance is still calculated for display purposes (in session currency)
+  const spent = creditsUsed * questionPrice;
+  balance = totalReceivedInSessionCurrency - spent;
+
+  return {
+    guestId,
+    sessionId,
+    balance: Math.max(0, balance),
+    totalReceived: guestPayment.totalReceived,
+    questionCredits,
+    assetCode: guestPayment.assetCode,
+    assetScale: guestPayment.assetScale,
+  };
+}
+
+export async function deductGuestCredit(
+  guestId: string,
+  sessionId: string
+): Promise<GuestBalance | null> {
+  const currentBalance = await getGuestBalance(guestId, sessionId);
+  
+  if (!currentBalance) {
+    return null;
+  }
+
+  // Check if user has at least 1 credit
+  if (currentBalance.questionCredits < 1) {
+    throw new Error("Insufficient credits");
+  }
+
+  // Credits are deducted when we create a question
+  // The balance calculation will automatically account for it
+  return currentBalance;
 }

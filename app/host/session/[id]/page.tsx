@@ -77,8 +77,13 @@ export default function SessionManagementPage() {
 
     const loadData = async () => {
       setLoading(true);
-      await Promise.all([fetchSession(), fetchQuestions()]);
-      setLoading(false);
+      try {
+        await Promise.all([fetchSession(), fetchQuestions()]);
+      } catch (error) {
+        console.error("Failed to load session data:", error);
+      } finally {
+        setLoading(false);
+      }
     };
 
     loadData();
