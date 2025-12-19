@@ -338,7 +338,7 @@ export async function checkPaymentComplete(
   accessToken: string
 ): Promise<boolean> {
   const payment = await getIncomingPayment(incomingPaymentUrl, accessToken);
-  return payment.completed;
+  return payment?.completed || false;
 }
 
 /**

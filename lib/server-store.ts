@@ -413,7 +413,7 @@ export async function getAllGuestPaymentsBySession(sessionId: string): Promise<G
         const maxScans = 100; // Prevent infinite loops
         
         do {
-          const result = await redis.scan(cursor, { match: `${GUEST_PAYMENTS_KEY}:*:${sessionId}`, count: 100 });
+          const result: [string, string[]] = await redis.scan(cursor, { match: `${GUEST_PAYMENTS_KEY}:*:${sessionId}`, count: 100 });
           cursor = result[0];
           const keys = result[1] || [];
           
