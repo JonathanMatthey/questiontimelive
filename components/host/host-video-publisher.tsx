@@ -15,6 +15,44 @@ interface HostVideoPublisherProps {
   isCurrentUser?: boolean; // Only show controls if this is the current user's slot
 }
 
+function HostViewer({ hostNumber }: { hostNumber: number }) {
+  // Subscribe to the specific host's video track
+  const tracks = useTracks(
+    [{ source: Track.Source.Camera, withPlaceholder: false }],
+    { onlySubscribed: true }
+  );
+
+  const hostTrack = tracks.find(
+    (track) =>
+      track.participant.identity.includes(`-host-${hostNumber}`) &&
+      track.publication
+  );
+
+  if (hostTrack && hostTrack.publication) {
+    return (
+      <>
+        <VideoTrack
+          trackRef={hostTrack as any}
+          className="absolute inset-0 w-full h-full object-cover"
+        />
+        <div className="absolute top-4 left-4 flex items-center gap-2 bg-black/50 backdrop-blur-sm rounded-full px-3 py-1.5">
+          <span className="w-2 h-2 bg-red-500 rounded-full live-pulse" />
+          <span className="text-xs font-semibold text-white">LIVE</span>
+        </div>
+      </>
+    );
+  }
+
+  return (
+    <div className="absolute inset-0 flex flex-col items-center justify-center text-white">
+      <div className="w-16 h-16 bg-white/10 rounded-full flex items-center justify-center mb-3">
+        <VideoOff className="w-8 h-8 text-white/70" />
+      </div>
+      <p className="text-sm text-white/70">Host {hostNumber} offline</p>
+    </div>
+  );
+}
+
 function HostControls() {
   const { localParticipant } = useLocalParticipant();
   const [isCameraEnabled, setIsCameraEnabled] = useState(false);
@@ -181,32 +219,45 @@ export function HostVideoPublisher({
     fetchToken();
   }, [sessionId, hostNumber, livekitServerUrl, isCurrentUser]);
 
+  // Fetch token for viewing other hosts' streams (when not current user)
+  useEffect(() => {
+    if (!livekitServerUrl || !sessionId || isCurrentUser) return;
+
+    const fetchViewerToken = async () => {
+      setLoadingLivekit(true);
+      setLivekitError(null);
+
+      try {
+        const response = await fetch("/api/livekit-token", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            roomName: sessionId,
+            role: "viewer",
+            identity: `viewer-${sessionId}-host${hostNumber}`,
+          }),
+        });
+
+        const data = await response.json();
+        if (!response.ok || !data?.token) {
+          throw new Error(data?.error || "Failed to fetch LiveKit token");
+        }
+
+        setLivekitToken(data.token as string);
+      } catch (error) {
+        console.error("LiveKit viewer token error", error);
+        setLivekitError("Failed to connect to live video service");
+      } finally {
+        setLoadingLivekit(false);
+      }
+    };
+
+    fetchViewerToken();
+  }, [sessionId, hostNumber, livekitServerUrl, isCurrentUser]);
+
   const handleConnected = useCallback((room?: Room) => {
     console.log("Connected to LiveKit room:", room?.name);
   }, []);
-
-  // Show placeholder for other hosts' slots (not current user)
-  if (!isCurrentUser) {
-    return (
-      <motion.div
-        initial={{ opacity: 0, scale: 0.98 }}
-        animate={{ opacity: 1, scale: 1 }}
-        className="relative aspect-video bg-secondary rounded-xl overflow-hidden border border-border"
-      >
-        <div className="absolute inset-0 flex flex-col items-center justify-center text-center p-8">
-          <div className="w-16 h-16 bg-muted rounded-2xl flex items-center justify-center mb-4">
-            <Video className="w-8 h-8 text-muted-foreground" />
-          </div>
-          <h3 className="text-lg font-semibold mb-2 text-foreground">
-            Host {hostNumber}
-          </h3>
-          <p className="text-muted-foreground text-sm">
-            Waiting for co-host to join...
-          </p>
-        </div>
-      </motion.div>
-    );
-  }
 
   if (!livekitServerUrl) {
     return (
@@ -275,17 +326,21 @@ export function HostVideoPublisher({
         token={livekitToken}
         serverUrl={livekitServerUrl}
         connect={Boolean(livekitToken)}
-        video={true}
-        audio={true}
+        video={isCurrentUser}
+        audio={isCurrentUser}
         connectOptions={{ autoSubscribe: true }}
         onConnected={handleConnected}
         data-lk-theme="default"
       >
-        <HostControls />
+        {isCurrentUser ? (
+          <HostControls />
+        ) : (
+          <HostViewer hostNumber={hostNumber} />
+        )}
       </LiveKitRoom>
 
       {/* Label */}
-      <div className="absolute top-4 right-4 bg-white/90 backdrop-blur-sm text-xs font-semibold text-foreground px-3 py-1 rounded-full shadow-sm">
+      <div className="absolute top-4 right-4 bg-white/90 backdrop-blur-sm text-xs font-semibold text-foreground px-3 py-1 rounded-full shadow-sm z-10">
         Host {hostNumber}
       </div>
     </motion.div>

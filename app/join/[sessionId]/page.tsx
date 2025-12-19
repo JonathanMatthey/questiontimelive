@@ -77,7 +77,7 @@ export default function CoHostJoinPage() {
     if (!sessionId || !token || !mounted) return;
 
     const hostNum = parseInt(hostNumberParam || "0", 10);
-    if (hostNum < 2 || hostNum > 4) {
+    if (hostNum !== 2) {
       setTokenValid(false);
       return;
     }
@@ -343,9 +343,9 @@ export default function CoHostJoinPage() {
       </header>
 
       <main className="container mx-auto px-4 py-8">
-        {/* 4-host video grid - only current user's slot is active */}
+        {/* 2-host video grid - only current user's slot is active */}
         <div className="mb-6 grid grid-cols-1 md:grid-cols-2 gap-4">
-          {([1, 2, 3, 4] as const).map((hostNum) => (
+          {([1, 2] as const).map((hostNum) => (
             <HostVideoPublisher
               key={hostNum}
               sessionId={session.id}
