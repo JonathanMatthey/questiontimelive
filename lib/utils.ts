@@ -49,16 +49,34 @@ export function truncateText(text: string, maxLength: number): string {
 }
 
 export function parseWalletAddress(input: string): string {
+  if (!input) return input;
+  
+  // Normalize: trim and remove duplicate protocols/spaces
+  let normalized = input.trim();
+  
+  // Remove spaces after protocols
+  normalized = normalized.replace(/https:\/\/\s+/g, "https://");
+  normalized = normalized.replace(/http:\/\/\s+/g, "http://");
+  
+  // Remove duplicate protocols
+  normalized = normalized.replace(/https:\/\/https:\/\//g, "https://");
+  normalized = normalized.replace(/http:\/\/https:\/\//g, "https://");
+  normalized = normalized.replace(/https:\/\/http:\/\//g, "https://");
+  
   // Convert payment pointer format ($wallet.example/alice) to URL
-  if (input.startsWith("$")) {
-    return `https://${input.slice(1)}`;
+  if (normalized.startsWith("$")) {
+    return `https://${normalized.slice(1)}`;
   }
   // Already a URL
-  if (input.startsWith("https://") || input.startsWith("http://")) {
-    return input;
+  if (normalized.startsWith("https://") || normalized.startsWith("http://")) {
+    // Normalize http:// to https://
+    if (normalized.startsWith("http://") && !normalized.startsWith("https://")) {
+      return normalized.replace("http://", "https://");
+    }
+    return normalized;
   }
   // Assume it's a domain/path and add https://
-  return `https://${input}`;
+  return `https://${normalized}`;
 }
 
 export function generateSessionCode(length: number = 6): string {

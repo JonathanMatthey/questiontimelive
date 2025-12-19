@@ -13,6 +13,9 @@ import { QuestionsList } from "@/components/viewer/questions-list";
 import { formatCurrency, formatRelativeTime } from "@/lib/utils";
 import type { Session, SessionStats, Question } from "@/lib/types";
 
+// Default wallet address for Web Monetization
+const DEFAULT_WALLET_ADDRESS = "https://ilp.interledger-test.dev/d376ecbd";
+
 export default function WatchPage() {
   const params = useParams();
   const sessionId = params?.id as string;
@@ -57,6 +60,57 @@ export default function WatchPage() {
   useEffect(() => {
     setMounted(true);
   }, []);
+
+  // Add Web Monetization link tag to document head
+  // Following Web Monetization spec: https://webmonetization.org/specification/
+  useEffect(() => {
+    if (!mounted) return;
+
+    let walletAddress = session?.hostWalletAddress || DEFAULT_WALLET_ADDRESS;
+    
+    // Normalize the wallet address - remove any duplicate protocols and spaces
+    // Handle cases like "https:// https://example.com" or "https://https://example.com"
+    walletAddress = walletAddress.trim();
+    
+    // Remove any spaces after https:// or http://
+    walletAddress = walletAddress.replace(/https:\/\/\s+/g, "https://");
+    walletAddress = walletAddress.replace(/http:\/\/\s+/g, "http://");
+    
+    // Remove duplicate protocols
+    walletAddress = walletAddress.replace(/https:\/\/https:\/\//g, "https://");
+    walletAddress = walletAddress.replace(/http:\/\/https:\/\//g, "https://");
+    walletAddress = walletAddress.replace(/https:\/\/http:\/\//g, "https://");
+    
+    // Ensure it starts with https:// (normalize http:// to https://)
+    if (walletAddress.startsWith("http://") && !walletAddress.startsWith("https://")) {
+      walletAddress = walletAddress.replace("http://", "https://");
+    }
+    
+    // Final trim
+    walletAddress = walletAddress.trim();
+    
+    // Check if monetization link already exists
+    let monetizationLink = document.querySelector('link[rel="monetization"]') as HTMLLinkElement | null;
+    
+    if (!monetizationLink) {
+      // Create the monetization link according to spec Section 4
+      monetizationLink = document.createElement("link");
+      monetizationLink.rel = "monetization";
+      document.head.appendChild(monetizationLink);
+    }
+    
+    // Set/update the wallet address (payment pointer)
+    // The href should be a payment pointer URL
+    monetizationLink.href = walletAddress;
+
+    // Cleanup on unmount
+    return () => {
+      const link = document.querySelector('link[rel="monetization"]');
+      if (link && link.parentNode) {
+        link.remove();
+      }
+    };
+  }, [mounted, session?.hostWalletAddress]);
 
   // Track viewer count
   useEffect(() => {
