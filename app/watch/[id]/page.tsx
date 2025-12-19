@@ -53,6 +53,32 @@ export default function WatchPage() {
     setMounted(true);
   }, []);
 
+  // Track viewer count
+  useEffect(() => {
+    if (!sessionId || !mounted) return;
+
+    // Join
+    fetch("/api/viewers", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ sessionId, action: "join" }),
+    }).catch(console.error);
+
+    // Leave on unmount or tab close
+    const handleLeave = () => {
+      navigator.sendBeacon(
+        "/api/viewers",
+        JSON.stringify({ sessionId, action: "leave" })
+      );
+    };
+
+    window.addEventListener("beforeunload", handleLeave);
+    return () => {
+      window.removeEventListener("beforeunload", handleLeave);
+      handleLeave();
+    };
+  }, [sessionId, mounted]);
+
   useEffect(() => {
     if (!sessionId || !mounted) return;
 

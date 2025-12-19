@@ -347,6 +347,51 @@ export async function updatePayment(id: string, updates: Partial<Payment>): Prom
   return updated;
 }
 
+// Viewer count operations
+export async function getViewerCount(sessionId: string): Promise<number> {
+  const redis = await getRedis();
+
+  if (redis) {
+    const count = await redis.get<number>(`viewers:${sessionId}`);
+    return count || 0;
+  } else {
+    return memoryStore.viewerCounts.get(sessionId) || 0;
+  }
+}
+
+export async function incrementViewerCount(sessionId: string): Promise<number> {
+  const redis = await getRedis();
+
+  if (redis) {
+    const count = await redis.incr(`viewers:${sessionId}`);
+    return count;
+  } else {
+    const current = memoryStore.viewerCounts.get(sessionId) || 0;
+    const newCount = current + 1;
+    memoryStore.viewerCounts.set(sessionId, newCount);
+    return newCount;
+  }
+}
+
+export async function decrementViewerCount(sessionId: string): Promise<number> {
+  const redis = await getRedis();
+
+  if (redis) {
+    const count = await redis.decr(`viewers:${sessionId}`);
+    // Don't go below 0
+    if (count < 0) {
+      await redis.set(`viewers:${sessionId}`, 0);
+      return 0;
+    }
+    return count;
+  } else {
+    const current = memoryStore.viewerCounts.get(sessionId) || 0;
+    const newCount = Math.max(0, current - 1);
+    memoryStore.viewerCounts.set(sessionId, newCount);
+    return newCount;
+  }
+}
+
 // Stats
 export async function getSessionStats(sessionId: string) {
   const redis = await getRedis();
@@ -366,11 +411,12 @@ export async function getSessionStats(sessionId: string) {
   }
 
   const completedPayments = payments.filter(p => p && p.status === "completed") as Payment[];
+  const viewerCount = await getViewerCount(sessionId);
 
   return {
     totalQuestions: questions.filter(q => q.status !== "pending_payment").length,
     answeredQuestions: questions.filter(q => q.status === "answered").length,
     totalEarned: completedPayments.reduce((sum, p) => sum + p.amount, 0),
-    viewerCount: Math.floor(Math.random() * 50) + 10, // Mock for now
+    viewerCount,
   };
 }

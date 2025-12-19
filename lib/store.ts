@@ -254,7 +254,7 @@ export const useAppStore = create<AppState>()(
           totalQuestions: questions.filter((q) => q.status !== "pending_payment").length,
           answeredQuestions: questions.filter((q) => q.status === "answered").length,
           totalEarned: payments.reduce((sum, p) => sum + p.amount, 0),
-          viewerCount: Math.floor(Math.random() * 50) + 10, // Mock viewer count
+          viewerCount: 0, // Fetched from server
         };
       },
 

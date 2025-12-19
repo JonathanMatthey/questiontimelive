@@ -3,7 +3,22 @@ import { incrementViewerCount, decrementViewerCount, getViewerCount } from "@/li
 
 export async function POST(request: Request) {
   try {
-    const { sessionId, action } = await request.json();
+    // Handle both JSON and sendBeacon (text/plain) requests
+    const contentType = request.headers.get("content-type") || "";
+    let sessionId: string;
+    let action: string;
+
+    if (contentType.includes("application/json")) {
+      const body = await request.json();
+      sessionId = body.sessionId;
+      action = body.action;
+    } else {
+      // sendBeacon sends as text/plain
+      const text = await request.text();
+      const body = JSON.parse(text);
+      sessionId = body.sessionId;
+      action = body.action;
+    }
 
     if (!sessionId || !action) {
       return NextResponse.json({ error: "Missing sessionId or action" }, { status: 400 });
