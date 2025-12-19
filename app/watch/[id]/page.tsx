@@ -7,10 +7,11 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { Badge } from "@/components/ui/badge";
 import { MultiHostViewer } from "@/components/viewer/multi-host-viewer";
+import { CurrentQuestion } from "@/components/viewer/current-question";
 import { QuestionForm } from "@/components/viewer/question-form";
 import { QuestionsList } from "@/components/viewer/questions-list";
 import { formatCurrency, formatRelativeTime } from "@/lib/utils";
-import type { Session, SessionStats } from "@/lib/types";
+import type { Session, SessionStats, Question } from "@/lib/types";
 
 export default function WatchPage() {
   const params = useParams();
@@ -18,6 +19,7 @@ export default function WatchPage() {
 
   const [session, setSession] = useState<Session | undefined>(undefined);
   const [stats, setStats] = useState<SessionStats>({ totalQuestions: 0, answeredQuestions: 0, totalEarned: 0, viewerCount: 0 });
+  const [activeQuestion, setActiveQuestion] = useState<Question | null>(null);
   const [mounted, setMounted] = useState(false);
   const [loading, setLoading] = useState(true);
 
@@ -35,7 +37,7 @@ export default function WatchPage() {
     }
   }, [sessionId]);
 
-  // Fetch stats from server
+  // Fetch stats and active question from server
   const fetchStats = useCallback(async () => {
     if (!sessionId) return;
     try {
@@ -43,6 +45,9 @@ export default function WatchPage() {
       if (response.ok) {
         const data = await response.json();
         setStats(data.stats || { totalQuestions: 0, answeredQuestions: 0, totalEarned: 0, viewerCount: 0 });
+        // Find the active question
+        const active = (data.questions || []).find((q: Question) => q.status === "active");
+        setActiveQuestion(active || null);
       }
     } catch (error) {
       console.error("Failed to fetch stats:", error);
@@ -192,6 +197,9 @@ export default function WatchPage() {
               sessionId={session.id}
               sessionTitle={session.title}
             />
+
+            {/* Current Question */}
+            <CurrentQuestion question={activeQuestion} />
 
             <div className="lg:hidden">
               <QuestionsList

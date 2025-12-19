@@ -86,6 +86,13 @@ export async function PATCH(request: Request) {
 
     // Handle special actions
     if (updates.action === "answer") {
+      // "Answer Question" sets it as active (currently being answered)
+      const updated = await updateQuestion(id, { status: "active" });
+      return NextResponse.json(updated);
+    }
+
+    if (updates.action === "complete") {
+      // "Complete Question" marks it as answered
       const updated = await updateQuestion(id, {
         status: "answered",
         answeredAt: new Date(),

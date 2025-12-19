@@ -13,6 +13,7 @@ interface QuestionCardProps {
   assetCode: string;
   assetScale: number;
   onAnswer?: () => void;
+  onComplete?: () => void;
   onSkip?: () => void;
   onUpvote?: () => void;
   isHost?: boolean;
@@ -24,6 +25,7 @@ export function QuestionCard({
   assetCode,
   assetScale,
   onAnswer,
+  onComplete,
   onSkip,
   onUpvote,
   isHost = false,
@@ -33,12 +35,15 @@ export function QuestionCard({
     pending_payment: "warning",
     paid: "accent",
     queued: "default",
+    active: "live",
     answered: "success",
     skipped: "secondary",
   } as const;
 
-  const isActive = question.status === "paid" || question.status === "queued";
-  const canInteract = isHost && isActive;
+  const isInQueue = question.status === "paid" || question.status === "queued";
+  const isActiveQuestion = question.status === "active";
+  const canAnswer = isHost && isInQueue;
+  const canComplete = isHost && isActiveQuestion;
 
   return (
     <motion.div
@@ -48,7 +53,7 @@ export function QuestionCard({
       transition={{ duration: 0.2, delay: index * 0.03 }}
       layout
     >
-      <Card className={`bg-white transition-all ${isActive ? "border-primary/30" : ""} ${question.status === "answered" ? "opacity-60" : ""}`}>
+      <Card className={`bg-white transition-all ${isInQueue ? "border-primary/30" : ""} ${isActiveQuestion ? "border-red-300 border-2 " : ""} ${question.status === "answered" ? "opacity-60" : ""}`}>
         <CardContent className="p-4">
           <div className="flex gap-4">
             {/* Upvote section */}
@@ -58,7 +63,7 @@ export function QuestionCard({
                 size="icon"
                 className="h-8 w-8 text-muted-foreground hover:text-primary hover:bg-primary/10"
                 onClick={onUpvote}
-                disabled={!isActive}
+                disabled={!isInQueue}
               >
                 <ChevronUp className="w-5 h-5" />
               </Button>
@@ -88,7 +93,7 @@ export function QuestionCard({
                   <span>{question.submitterName}</span>
                 </div>
 
-                {canInteract && (
+                {canAnswer && (
                   <div className="flex gap-2">
                     <Button
                       variant="ghost"
@@ -100,12 +105,36 @@ export function QuestionCard({
                       Skip
                     </Button>
                     <Button
-                      variant="accent"
+                      variant="default"
                       size="sm"
                       onClick={onAnswer}
+                      className="bg-amber-100 text-amber-800 hover:bg-amber-200"
                     >
                       <Check className="w-4 h-4 mr-1" />
-                      Answered
+                      Answer Question
+                    </Button>
+                  </div>
+                )}
+
+                {canComplete && (
+                  <div className="flex gap-2">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={onSkip}
+                      className="text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+                    >
+                      <X className="w-4 h-4 mr-1" />
+                      Skip
+                    </Button>
+                    <Button
+                      variant="default"
+                      size="sm"
+                      onClick={onComplete}
+                      className="bg-green-600 hover:bg-green-700"
+                    >
+                      <Check className="w-4 h-4 mr-1" />
+                      Complete Question
                     </Button>
                   </div>
                 )}

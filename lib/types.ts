@@ -28,7 +28,7 @@ export interface Question {
   submitterWalletAddress?: string;
   amountPaid: number;
   paymentId?: string;
-  status: "pending_payment" | "paid" | "queued" | "answered" | "skipped";
+  status: "pending_payment" | "paid" | "queued" | "active" | "answered" | "skipped";
   createdAt: Date;
   answeredAt?: Date;
   upvotes: number;

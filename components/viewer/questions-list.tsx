@@ -55,7 +55,7 @@ export function QuestionsList({ sessionId, assetCode, assetScale }: QuestionsLis
   };
 
   const displayQuestions = useMemo(() => {
-    const filtered = questions.filter((q) => q.status !== "pending_payment");
+    const filtered = questions.filter((q) => q.status !== "pending_payment" && q.status !== "skipped");
 
     switch (sortBy) {
       case "oldest":

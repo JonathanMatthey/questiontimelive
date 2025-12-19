@@ -242,6 +242,19 @@ export default function SessionManagementPage() {
     }
   };
 
+  const handleCompleteQuestion = async (questionId: string) => {
+    try {
+      await fetch("/api/questions", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: questionId, action: "complete" }),
+      });
+      fetchQuestions();
+    } catch (error) {
+      console.error("Failed to complete question:", error);
+    }
+  };
+
   const handleSkipQuestion = async (questionId: string) => {
     try {
       await fetch("/api/questions", {
@@ -521,6 +534,7 @@ export default function SessionManagementPage() {
                     assetScale={session.assetScale}
                     isHost={true}
                     onAnswer={() => handleAnswerQuestion(question.id)}
+                    onComplete={() => handleCompleteQuestion(question.id)}
                     onSkip={() => handleSkipQuestion(question.id)}
                     onUpvote={() => handleUpvoteQuestion(question.id)}
                     index={index}
