@@ -1,3 +1,9 @@
+export interface CoHostToken {
+  hostNumber: 2 | 3 | 4;
+  token: string;
+  claimed: boolean;
+}
+
 export interface Session {
   id: string;
   title: string;
@@ -11,6 +17,7 @@ export interface Session {
   createdAt: Date;
   startedAt?: Date;
   endedAt?: Date;
+  coHostTokens?: CoHostToken[];
 }
 
 export interface Question {

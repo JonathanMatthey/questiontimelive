@@ -1,12 +1,11 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, useEffect, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { MessageSquare, ChevronUp, Filter } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { useAppStore } from "@/lib/store";
 import { formatCurrency, formatRelativeTime } from "@/lib/utils";
 import type { Question, QuestionSortOption } from "@/lib/types";
 
@@ -17,10 +16,43 @@ interface QuestionsListProps {
 }
 
 export function QuestionsList({ sessionId, assetCode, assetScale }: QuestionsListProps) {
-  const { getQuestionsBySession, upvoteQuestion } = useAppStore();
+  const [questions, setQuestions] = useState<Question[]>([]);
   const [sortBy, setSortBy] = useState<QuestionSortOption>("newest");
 
-  const questions = getQuestionsBySession(sessionId);
+  // Fetch questions from server
+  const fetchQuestions = useCallback(async () => {
+    if (!sessionId) return;
+    try {
+      const response = await fetch(`/api/questions?sessionId=${sessionId}`);
+      if (response.ok) {
+        const data = await response.json();
+        setQuestions(data.questions || []);
+      }
+    } catch (error) {
+      console.error("Failed to fetch questions:", error);
+    }
+  }, [sessionId]);
+
+  useEffect(() => {
+    fetchQuestions();
+
+    // Poll for updates
+    const interval = setInterval(fetchQuestions, 2000);
+    return () => clearInterval(interval);
+  }, [fetchQuestions]);
+
+  const handleUpvote = async (questionId: string) => {
+    try {
+      await fetch("/api/questions", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: questionId, action: "upvote" }),
+      });
+      fetchQuestions();
+    } catch (error) {
+      console.error("Failed to upvote question:", error);
+    }
+  };
 
   const displayQuestions = useMemo(() => {
     const filtered = questions.filter((q) => q.status !== "pending_payment");
@@ -84,7 +116,7 @@ export function QuestionsList({ sessionId, assetCode, assetScale }: QuestionsLis
                   question={question}
                   assetCode={assetCode}
                   assetScale={assetScale}
-                  onUpvote={() => upvoteQuestion(question.id)}
+                  onUpvote={() => handleUpvote(question.id)}
                   index={index}
                 />
               ))}

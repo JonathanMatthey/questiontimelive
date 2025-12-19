@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import { nanoid } from "nanoid";
-import type { Session, Question, Payment, SessionStats } from "./types";
+import type { Session, Question, Payment, SessionStats, CoHostToken } from "./types";
 
 interface AppState {
   // Sessions
@@ -13,6 +13,11 @@ interface AppState {
   startSession: (id: string) => void;
   endSession: (id: string) => void;
   getSessionById: (id: string) => Session | undefined;
+
+  // Co-host invites
+  generateCoHostInvite: (sessionId: string, hostNumber: 2 | 3 | 4) => string | null;
+  claimCoHostInvite: (sessionId: string, token: string) => { hostNumber: number } | null;
+  getCoHostToken: (sessionId: string, hostNumber: 2 | 3 | 4) => CoHostToken | undefined;
 
   // Questions
   questions: Question[];
@@ -91,6 +96,70 @@ export const useAppStore = create<AppState>()(
 
       getSessionById: (id) => {
         return get().sessions.find((s) => s.id === id);
+      },
+
+      // Co-host invites
+      generateCoHostInvite: (sessionId, hostNumber) => {
+        const session = get().sessions.find((s) => s.id === sessionId);
+        if (!session) return null;
+
+        // Check if token already exists for this host number
+        const existingToken = session.coHostTokens?.find(
+          (t) => t.hostNumber === hostNumber
+        );
+        if (existingToken) return existingToken.token;
+
+        // Generate new token
+        const token = nanoid(12);
+        const newCoHostToken: CoHostToken = {
+          hostNumber,
+          token,
+          claimed: false,
+        };
+
+        set((state) => ({
+          sessions: state.sessions.map((s) =>
+            s.id === sessionId
+              ? {
+                  ...s,
+                  coHostTokens: [...(s.coHostTokens || []), newCoHostToken],
+                }
+              : s
+          ),
+        }));
+
+        return token;
+      },
+
+      claimCoHostInvite: (sessionId, token) => {
+        const session = get().sessions.find((s) => s.id === sessionId);
+        if (!session) return null;
+
+        const coHostToken = session.coHostTokens?.find(
+          (t) => t.token === token && !t.claimed
+        );
+        if (!coHostToken) return null;
+
+        // Mark token as claimed
+        set((state) => ({
+          sessions: state.sessions.map((s) =>
+            s.id === sessionId
+              ? {
+                  ...s,
+                  coHostTokens: s.coHostTokens?.map((t) =>
+                    t.token === token ? { ...t, claimed: true } : t
+                  ),
+                }
+              : s
+          ),
+        }));
+
+        return { hostNumber: coHostToken.hostNumber };
+      },
+
+      getCoHostToken: (sessionId, hostNumber) => {
+        const session = get().sessions.find((s) => s.id === sessionId);
+        return session?.coHostTokens?.find((t) => t.hostNumber === hostNumber);
       },
 
       // Questions

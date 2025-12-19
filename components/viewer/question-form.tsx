@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useRef } from "react";
 import { motion } from "framer-motion";
 import { Send, DollarSign, User, Wallet, Loader2, Check, AlertCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -8,7 +8,6 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { formatCurrency, parseWalletAddress } from "@/lib/utils";
-import { useAppStore } from "@/lib/store";
 import type { Session } from "@/lib/types";
 
 interface QuestionFormProps {
@@ -18,14 +17,13 @@ interface QuestionFormProps {
 type PaymentStatus = "idle" | "creating" | "awaiting" | "completed" | "error";
 
 export function QuestionForm({ session }: QuestionFormProps) {
-  const { addQuestion, updateQuestion, addPayment, updatePayment } = useAppStore();
-  
   const [name, setName] = useState("");
   const [question, setQuestion] = useState("");
   const [walletAddress, setWalletAddress] = useState("");
   const [paymentStatus, setPaymentStatus] = useState<PaymentStatus>("idle");
   const [errorMessage, setErrorMessage] = useState("");
   const [showWalletInput, setShowWalletInput] = useState(false);
+  const questionIdRef = useRef<string | null>(null);
 
   const canSubmit = name.trim() && question.trim() && session.status === "live";
 
@@ -38,43 +36,164 @@ export function QuestionForm({ session }: QuestionFormProps) {
     setErrorMessage("");
 
     try {
-      const newQuestion = addQuestion({
-        sessionId: session.id,
-        text: question.trim(),
-        submitterName: name.trim(),
-        submitterWalletAddress: walletAddress ? parseWalletAddress(walletAddress) : undefined,
-        amountPaid: session.questionPrice,
-        status: "pending_payment",
+      // Create the question via server API
+      const questionResponse = await fetch("/api/questions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          sessionId: session.id,
+          text: question.trim(),
+          submitterName: name.trim(),
+          submitterWalletAddress: walletAddress ? parseWalletAddress(walletAddress) : undefined,
+          amountPaid: session.questionPrice,
+          status: "pending_payment",
+        }),
       });
 
-      const payment = addPayment({
-        questionId: newQuestion.id,
-        sessionId: session.id,
-        incomingPaymentUrl: "",
-        amount: session.questionPrice,
-        assetCode: session.assetCode,
-        assetScale: session.assetScale,
-        status: "pending",
+      if (!questionResponse.ok) {
+        throw new Error("Failed to create question");
+      }
+
+      const newQuestion = await questionResponse.json();
+      questionIdRef.current = newQuestion.id;
+
+      // Create incoming payment via API
+      const paymentResponse = await fetch("/api/payments/create-incoming", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          hostWalletAddress: session.hostWalletAddress,
+          amount: session.questionPrice,
+          questionId: newQuestion.id,
+          sessionId: session.id,
+          assetCode: session.assetCode,
+          assetScale: session.assetScale,
+        }),
       });
+
+      let paymentData;
+      try {
+        const text = await paymentResponse.text();
+        paymentData = text ? JSON.parse(text) : {};
+      } catch (parseError) {
+        console.error("Failed to parse payment response:", parseError);
+        paymentData = { error: "Invalid response from server" };
+      }
+
+      if (!paymentResponse.ok) {
+        console.error("Payment creation failed:", {
+          status: paymentResponse.status,
+          statusText: paymentResponse.statusText,
+          error: paymentData.error,
+          details: paymentData.details,
+        });
+        throw new Error(paymentData.error || paymentData.details || `Failed to create payment (${paymentResponse.status})`);
+      }
+
+      // Update question with payment ID
+      await fetch("/api/questions", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          id: newQuestion.id,
+          paymentId: paymentData.paymentId,
+        }),
+      });
+
+      // If viewer provided wallet address, initiate outgoing payment
+      // Otherwise, simulate payment for demo purposes
+      if (walletAddress && !paymentData.mock) {
+        try {
+          // In a real implementation, you'd need viewer's wallet credentials
+          // For now, we'll simulate the payment
+          console.log("Viewer wallet provided, but credentials needed for real payment");
+        } catch (error) {
+          console.error("Failed to initiate outgoing payment:", error);
+        }
+      }
 
       setPaymentStatus("awaiting");
 
-      setTimeout(() => {
-        updatePayment(payment.id, {
-          status: "completed",
-          completedAt: new Date(),
-        });
-        updateQuestion(newQuestion.id, {
-          status: "paid",
-          paymentId: payment.id,
-        });
-        setPaymentStatus("completed");
+      // Poll for payment completion
+      const pollPaymentStatus = async () => {
+        const maxAttempts = 30; // 30 seconds max
+        let attempts = 0;
 
-        setTimeout(() => {
-          setQuestion("");
-          setPaymentStatus("idle");
-        }, 2000);
-      }, 2000);
+        const checkStatus = async () => {
+          attempts++;
+
+          try {
+            const statusResponse = await fetch(
+              `/api/payments/status?paymentUrl=${encodeURIComponent(paymentData.incomingPaymentUrl)}`
+            );
+            const statusData = await statusResponse.json();
+
+            if (statusData.completed) {
+              // Payment confirmed! Update question status via API
+              await fetch("/api/questions", {
+                method: "PATCH",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  id: newQuestion.id,
+                  action: "markPaid",
+                  paymentId: paymentData.paymentId || paymentData.incomingPaymentUrl,
+                }),
+              });
+              setPaymentStatus("completed");
+
+              setTimeout(() => {
+                setQuestion("");
+                setName("");
+                setWalletAddress("");
+                setShowWalletInput(false);
+                setPaymentStatus("idle");
+              }, 2000);
+              return;
+            }
+
+            if (attempts < maxAttempts) {
+              // Keep polling
+              setTimeout(checkStatus, 1000);
+            } else {
+              // Timeout - for demo purposes, mark as paid if it's a mock payment
+              // In production, you'd want to handle this differently
+              if (paymentData.mock) {
+                await fetch("/api/questions", {
+                  method: "PATCH",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({
+                    id: newQuestion.id,
+                    action: "markPaid",
+                    paymentId: paymentData.paymentId || paymentData.incomingPaymentUrl,
+                  }),
+                });
+                setPaymentStatus("completed");
+
+                setTimeout(() => {
+                  setQuestion("");
+                  setName("");
+                  setWalletAddress("");
+                  setShowWalletInput(false);
+                  setPaymentStatus("idle");
+                }, 2000);
+              } else {
+                setPaymentStatus("error");
+                setErrorMessage("Payment timeout. Please check your payment status.");
+              }
+            }
+          } catch (error) {
+            console.error("Status check error:", error);
+            // Continue polling even on error
+            if (attempts < maxAttempts) {
+              setTimeout(checkStatus, 1000);
+            }
+          }
+        };
+
+        checkStatus();
+      };
+
+      pollPaymentStatus();
 
     } catch (error) {
       console.error("Payment error:", error);

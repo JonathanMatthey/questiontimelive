@@ -10,8 +10,9 @@ import "@livekit/components-styles";
 
 interface HostVideoPublisherProps {
   sessionId: string;
-  hostNumber: 1 | 2;
+  hostNumber: 1 | 2 | 3 | 4;
   sessionTitle: string;
+  isCurrentUser?: boolean; // Only show controls if this is the current user's slot
 }
 
 function HostControls() {
@@ -137,6 +138,7 @@ export function HostVideoPublisher({
   sessionId,
   hostNumber,
   sessionTitle,
+  isCurrentUser = true,
 }: HostVideoPublisherProps) {
   const livekitServerUrl = process.env.NEXT_PUBLIC_LIVEKIT_WS_URL;
   const [livekitToken, setLivekitToken] = useState<string | null>(null);
@@ -144,7 +146,8 @@ export function HostVideoPublisher({
   const [loadingLivekit, setLoadingLivekit] = useState(false);
 
   useEffect(() => {
-    if (!livekitServerUrl || !sessionId) return;
+    // Only fetch token if this is the current user's slot
+    if (!livekitServerUrl || !sessionId || !isCurrentUser) return;
 
     const fetchToken = async () => {
       setLoadingLivekit(true);
@@ -176,11 +179,34 @@ export function HostVideoPublisher({
     };
 
     fetchToken();
-  }, [sessionId, hostNumber, livekitServerUrl]);
+  }, [sessionId, hostNumber, livekitServerUrl, isCurrentUser]);
 
   const handleConnected = useCallback((room?: Room) => {
     console.log("Connected to LiveKit room:", room?.name);
   }, []);
+
+  // Show placeholder for other hosts' slots (not current user)
+  if (!isCurrentUser) {
+    return (
+      <motion.div
+        initial={{ opacity: 0, scale: 0.98 }}
+        animate={{ opacity: 1, scale: 1 }}
+        className="relative aspect-video bg-secondary rounded-xl overflow-hidden border border-border"
+      >
+        <div className="absolute inset-0 flex flex-col items-center justify-center text-center p-8">
+          <div className="w-16 h-16 bg-muted rounded-2xl flex items-center justify-center mb-4">
+            <Video className="w-8 h-8 text-muted-foreground" />
+          </div>
+          <h3 className="text-lg font-semibold mb-2 text-foreground">
+            Host {hostNumber}
+          </h3>
+          <p className="text-muted-foreground text-sm">
+            Waiting for co-host to join...
+          </p>
+        </div>
+      </motion.div>
+    );
+  }
 
   if (!livekitServerUrl) {
     return (

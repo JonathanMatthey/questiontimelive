@@ -6,16 +6,12 @@ import {
   Radio,
   Play,
   Square,
-  Copy,
-  ExternalLink,
   Filter,
   ArrowLeft,
-  Users,
-  Check,
-  UserPlus,
+  AlertCircle,
 } from "lucide-react";
 import Link from "next/link";
-import { useParams } from "next/navigation";
+import { useParams, useSearchParams } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { QuestionCard } from "@/components/host/question-card";
@@ -24,20 +20,22 @@ import { HostVideoPublisher } from "@/components/host/host-video-publisher";
 import { formatCurrency } from "@/lib/utils";
 import type { QuestionSortOption, Session, Question, SessionStats } from "@/lib/types";
 
-export default function SessionManagementPage() {
+export default function CoHostJoinPage() {
   const params = useParams();
-  const sessionId = params?.id as string;
+  const searchParams = useSearchParams();
+  const sessionId = params?.sessionId as string;
+  const token = searchParams?.get("token");
+  const hostNumberParam = searchParams?.get("host");
 
   const [session, setSession] = useState<Session | undefined>(undefined);
   const [questions, setQuestions] = useState<Question[]>([]);
   const [stats, setStats] = useState<SessionStats>({ totalQuestions: 0, answeredQuestions: 0, totalEarned: 0, viewerCount: 0 });
   const [sortBy, setSortBy] = useState<QuestionSortOption>("newest");
   const [filterStatus, setFilterStatus] = useState<string>("all");
-  const [copied, setCopied] = useState(false);
-  const [copiedInvite, setCopiedInvite] = useState<number | null>(null);
   const [mounted, setMounted] = useState(false);
   const [loading, setLoading] = useState(true);
-  const [copyError, setCopyError] = useState<string | null>(null);
+  const [tokenValid, setTokenValid] = useState<boolean | null>(null);
+  const [myHostNumber, setMyHostNumber] = useState<number | null>(null);
 
   // Fetch session data from server
   const fetchSession = useCallback(async () => {
@@ -47,10 +45,12 @@ export default function SessionManagementPage() {
       if (response.ok) {
         const data = await response.json();
         setSession(data);
+        return data;
       }
     } catch (error) {
       console.error("Failed to fetch session:", error);
     }
+    return null;
   }, [sessionId]);
 
   // Fetch questions from server
@@ -71,6 +71,49 @@ export default function SessionManagementPage() {
   useEffect(() => {
     setMounted(true);
   }, []);
+
+  // Validate token and claim co-host slot via API
+  useEffect(() => {
+    if (!sessionId || !token || !mounted) return;
+
+    const hostNum = parseInt(hostNumberParam || "0", 10);
+    if (hostNum < 2 || hostNum > 4) {
+      setTokenValid(false);
+      return;
+    }
+
+    const claimInvite = async () => {
+      try {
+        // Try to claim the invite via API
+        const response = await fetch(`/api/sessions/${sessionId}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "claimInvite", token }),
+        });
+
+        if (response.ok) {
+          const result = await response.json();
+          setTokenValid(true);
+          setMyHostNumber(result.hostNumber);
+        } else {
+          // Check if session exists and token is already claimed
+          const sess = await fetchSession();
+          const existingToken = sess?.coHostTokens?.find((t: { token: string; claimed: boolean; hostNumber: number }) => t.token === token);
+          if (existingToken?.claimed) {
+            setTokenValid(true);
+            setMyHostNumber(existingToken.hostNumber);
+          } else {
+            setTokenValid(false);
+          }
+        }
+      } catch (error) {
+        console.error("Failed to claim invite:", error);
+        setTokenValid(false);
+      }
+    };
+
+    claimInvite();
+  }, [sessionId, token, hostNumberParam, mounted, fetchSession]);
 
   useEffect(() => {
     if (!sessionId || !mounted) return;
@@ -103,7 +146,9 @@ export default function SessionManagementPage() {
 
     switch (sortBy) {
       case "oldest":
-        filtered.sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+        filtered.sort(
+          (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
+        );
         break;
       case "highest_paid":
         filtered.sort((a, b) => b.amountPaid - a.amountPaid);
@@ -112,55 +157,13 @@ export default function SessionManagementPage() {
         filtered.sort((a, b) => b.upvotes - a.upvotes);
         break;
       default:
-        filtered.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+        filtered.sort(
+          (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+        );
     }
 
     return filtered;
   }, [questions, sortBy, filterStatus]);
-
-  const viewerUrl = mounted && typeof window !== "undefined" ? `${window.location.origin}/watch/${sessionId}` : "";
-
-  const copyToClipboard = useCallback(async (text: string) => {
-    if (typeof navigator === "undefined" || typeof document === "undefined") {
-      return false;
-    }
-    try {
-      await navigator.clipboard.writeText(text);
-      return true;
-    } catch (error) {
-      // Fallback for environments where Clipboard API is blocked
-      try {
-        const textarea = document.createElement("textarea");
-        textarea.value = text;
-        textarea.style.position = "fixed";
-        textarea.style.opacity = "0";
-        document.body.appendChild(textarea);
-        textarea.select();
-        const success = document.execCommand("copy");
-        document.body.removeChild(textarea);
-        return success;
-      } catch (fallbackError) {
-        console.error("Clipboard copy failed", fallbackError);
-        return false;
-      }
-    }
-  }, []);
-
-  const handleCopyLink = async () => {
-    if (!viewerUrl) {
-      setCopyError("Viewer link is not available yet.");
-      return;
-    }
-
-    const copied = await copyToClipboard(viewerUrl);
-    if (copied) {
-      setCopyError(null);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    } else {
-      setCopyError(`Could not copy viewer link automatically. Copy manually: ${viewerUrl}`);
-    }
-  };
 
   const handleStartSession = async () => {
     if (!sessionId) return;
@@ -193,39 +196,6 @@ export default function SessionManagementPage() {
       }
     } catch (error) {
       console.error("Failed to end session:", error);
-    }
-  };
-
-  const handleInviteCoHost = async (hostNumber: 2 | 3 | 4) => {
-    if (!sessionId) return;
-    try {
-      const response = await fetch(`/api/sessions/${sessionId}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "generateInvite", hostNumber }),
-      });
-      if (!response.ok) {
-        setCopyError("Failed to generate invite link. Please try again.");
-        return;
-      }
-
-      const { token } = await response.json();
-      if (token && typeof window !== "undefined") {
-        const inviteUrl = `${window.location.origin}/join/${sessionId}?token=${token}&host=${hostNumber}`;
-        const copied = await copyToClipboard(inviteUrl);
-        if (copied) {
-          setCopyError(null);
-          setCopiedInvite(hostNumber);
-          setTimeout(() => setCopiedInvite(null), 2000);
-        } else {
-          setCopyError(`Could not copy invite automatically. Copy manually: ${inviteUrl}`);
-        }
-        // Refresh session to get updated tokens
-        fetchSession();
-      }
-    } catch (error) {
-      console.error("Failed to generate invite:", error);
-      setCopyError("Something went wrong generating the invite link. Please try again.");
     }
   };
 
@@ -276,15 +246,21 @@ export default function SessionManagementPage() {
     );
   }
 
-  if (!session) {
+  if (tokenValid === false) {
     return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="text-center">
-          <h2 className="text-2xl font-bold mb-4 text-foreground">Session not found</h2>
-          <Link href="/host">
+      <div className="min-h-screen flex items-center justify-center bg-secondary/30">
+        <div className="text-center max-w-md p-8">
+          <div className="w-16 h-16 bg-destructive/10 rounded-2xl flex items-center justify-center mb-4 mx-auto">
+            <AlertCircle className="w-8 h-8 text-destructive" />
+          </div>
+          <h2 className="text-2xl font-bold mb-4 text-foreground">Invalid Invite Link</h2>
+          <p className="text-muted-foreground mb-6">
+            This invite link is invalid or has expired. Please ask the session host for a new invite.
+          </p>
+          <Link href="/">
             <Button variant="outline">
               <ArrowLeft className="w-4 h-4 mr-2" />
-              Back to Dashboard
+              Go Home
             </Button>
           </Link>
         </div>
@@ -292,31 +268,29 @@ export default function SessionManagementPage() {
     );
   }
 
-  const coHostTokens = session.coHostTokens || [];
-  const isHostClaimed = (hostNum: 2 | 3 | 4) =>
-    coHostTokens.some((token) => token.hostNumber === hostNum && token.claimed);
-  const renderInviteButton = (hostNum: 2 | 3 | 4) => (
-    <Button
-      key={hostNum}
-      variant="secondary"
-      size="sm"
-      onClick={() => handleInviteCoHost(hostNum)}
-      className="shadow-sm"
-    >
-      {copiedInvite === hostNum ? (
-        <>
-          <Check className="w-4 h-4 mr-2" />
-          Link copied!
-        </>
-      ) : (
-        <>
-          <UserPlus className="w-4 h-4 mr-2" />
-          Invite Host {hostNum}
-        </>
-      )}
-    </Button>
-  );
-  const pendingHostInvites = ([3, 4] as const).filter((hostNum) => !isHostClaimed(hostNum));
+  if (!session) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="text-center">
+          <h2 className="text-2xl font-bold mb-4 text-foreground">Session not found</h2>
+          <Link href="/">
+            <Button variant="outline">
+              <ArrowLeft className="w-4 h-4 mr-2" />
+              Go Home
+            </Button>
+          </Link>
+        </div>
+      </div>
+    );
+  }
+
+  if (tokenValid === null) {
+    return (
+      <div className="min-h-screen bg-secondary/30 flex items-center justify-center">
+        <div className="text-muted-foreground">Validating invite...</div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-secondary/30">
@@ -324,19 +298,25 @@ export default function SessionManagementPage() {
       <header className="border-b border-border bg-white sticky top-0 z-50">
         <div className="container mx-auto px-4 py-4">
           <div className="flex items-center justify-between">
-            <Link href="/host" className="flex items-center gap-2">
+            <div className="flex items-center gap-2">
               <div className="w-9 h-9 bg-primary rounded-lg flex items-center justify-center">
                 <Radio className="w-5 h-5 text-white" />
               </div>
               <div>
                 <span className="text-lg font-bold text-foreground">LiveQuestionTime</span>
-                <span className="text-xs text-muted-foreground ml-2">Dashboard</span>
+                <span className="text-xs text-muted-foreground ml-2">Co-Host {myHostNumber}</span>
               </div>
-            </Link>
+            </div>
 
             <div className="flex items-center gap-3">
               <Badge
-                variant={session.status === "live" ? "live" : session.status === "draft" ? "outline" : "secondary"}
+                variant={
+                  session.status === "live"
+                    ? "live"
+                    : session.status === "draft"
+                    ? "outline"
+                    : "secondary"
+                }
                 className="px-3 py-1"
               >
                 {session.status === "live" && (
@@ -363,60 +343,18 @@ export default function SessionManagementPage() {
       </header>
 
       <main className="container mx-auto px-4 py-8">
-        {copyError && (
-          <div className="mb-4 rounded-lg border border-destructive/20 bg-destructive/10 px-3 py-2 text-sm text-destructive">
-            {copyError}
-          </div>
-        )}
-
-        {/* 4-host video grid */}
+        {/* 4-host video grid - only current user's slot is active */}
         <div className="mb-6 grid grid-cols-1 md:grid-cols-2 gap-4">
-          {/* Host 1 - Primary host (current user) */}
-          <HostVideoPublisher
-            sessionId={session.id}
-            hostNumber={1}
-            sessionTitle={session.title}
-            isCurrentUser={true}
-          />
-
-          {/* Host 2 - Co-host slot (always shown) */}
-          <div className="relative">
+          {([1, 2, 3, 4] as const).map((hostNum) => (
             <HostVideoPublisher
+              key={hostNum}
               sessionId={session.id}
-              hostNumber={2}
+              hostNumber={hostNum}
               sessionTitle={session.title}
-              isCurrentUser={false}
+              isCurrentUser={hostNum === myHostNumber}
             />
-            {!isHostClaimed(2) && (
-              <div className="absolute bottom-4 left-1/2 -translate-x-1/2">
-                {renderInviteButton(2)}
-              </div>
-            )}
-          </div>
-
-          {/* Hosts 3 & 4 - Only show video once claimed */}
-          {([3, 4] as const).map((hostNum) => {
-            if (!isHostClaimed(hostNum)) return null;
-            return (
-              <div key={hostNum} className="relative">
-                <HostVideoPublisher
-                  sessionId={session.id}
-                  hostNumber={hostNum}
-                  sessionTitle={session.title}
-                  isCurrentUser={false}
-                />
-              </div>
-            );
-          })}
+          ))}
         </div>
-
-        {/* Pending invites for hosts 3 & 4 (no big tiles) */}
-        {pendingHostInvites.length > 0 && (
-          <div className="mb-8 flex flex-wrap items-center gap-3">
-            <p className="text-sm font-medium text-muted-foreground">Invite additional hosts:</p>
-            {pendingHostInvites.map((hostNum) => renderInviteButton(hostNum))}
-          </div>
-        )}
 
         {/* Session info */}
         <motion.div
@@ -438,27 +376,6 @@ export default function SessionManagementPage() {
                   </span>{" "}
                   per question
                 </span>
-              </div>
-            </div>
-
-            {/* Share link */}
-            <div className="bg-white rounded-xl p-4 border border-border shadow-sm min-w-[300px]">
-              <p className="text-sm font-medium mb-2 flex items-center gap-2 text-foreground">
-                <Users className="w-4 h-4 text-accent" />
-                Viewer link
-              </p>
-              <div className="flex gap-2">
-                <code className="flex-1 bg-secondary rounded-lg px-3 py-2 text-xs text-muted-foreground truncate">
-                  {viewerUrl}
-                </code>
-                <Button variant="outline" size="sm" onClick={handleCopyLink}>
-                  {copied ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
-                </Button>
-                <Link href={viewerUrl} target="_blank">
-                  <Button variant="outline" size="sm">
-                    <ExternalLink className="w-4 h-4" />
-                  </Button>
-                </Link>
               </div>
             </div>
           </div>
@@ -507,7 +424,7 @@ export default function SessionManagementPage() {
             >
               <p className="text-muted-foreground mb-2">No questions yet</p>
               <p className="text-sm text-muted-foreground">
-                Share your viewer link to start receiving paid questions!
+                Questions will appear here when viewers submit them.
               </p>
             </motion.div>
           ) : (

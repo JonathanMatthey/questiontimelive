@@ -1,15 +1,14 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { motion } from "framer-motion";
 import { Radio, Users, Clock, DollarSign } from "lucide-react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { Badge } from "@/components/ui/badge";
-import { DualHostViewer } from "@/components/viewer/dual-host-viewer";
+import { MultiHostViewer } from "@/components/viewer/multi-host-viewer";
 import { QuestionForm } from "@/components/viewer/question-form";
 import { QuestionsList } from "@/components/viewer/questions-list";
-import { useAppStore } from "@/lib/store";
 import { formatCurrency, formatRelativeTime } from "@/lib/utils";
 import type { Session, SessionStats } from "@/lib/types";
 
@@ -17,10 +16,38 @@ export default function WatchPage() {
   const params = useParams();
   const sessionId = params?.id as string;
 
-  const { getSessionById, getSessionStats } = useAppStore();
   const [session, setSession] = useState<Session | undefined>(undefined);
   const [stats, setStats] = useState<SessionStats>({ totalQuestions: 0, answeredQuestions: 0, totalEarned: 0, viewerCount: 0 });
   const [mounted, setMounted] = useState(false);
+  const [loading, setLoading] = useState(true);
+
+  // Fetch session data from server
+  const fetchSession = useCallback(async () => {
+    if (!sessionId) return;
+    try {
+      const response = await fetch(`/api/sessions/${sessionId}`);
+      if (response.ok) {
+        const data = await response.json();
+        setSession(data);
+      }
+    } catch (error) {
+      console.error("Failed to fetch session:", error);
+    }
+  }, [sessionId]);
+
+  // Fetch stats from server
+  const fetchStats = useCallback(async () => {
+    if (!sessionId) return;
+    try {
+      const response = await fetch(`/api/questions?sessionId=${sessionId}`);
+      if (response.ok) {
+        const data = await response.json();
+        setStats(data.stats || { totalQuestions: 0, answeredQuestions: 0, totalEarned: 0, viewerCount: 0 });
+      }
+    } catch (error) {
+      console.error("Failed to fetch stats:", error);
+    }
+  }, [sessionId]);
 
   useEffect(() => {
     setMounted(true);
@@ -28,18 +55,25 @@ export default function WatchPage() {
 
   useEffect(() => {
     if (!sessionId || !mounted) return;
-    
-    setSession(getSessionById(sessionId));
-    setStats(getSessionStats(sessionId));
-    
-    const interval = setInterval(() => {
-      setSession(getSessionById(sessionId));
-      setStats(getSessionStats(sessionId));
-    }, 2000);
-    return () => clearInterval(interval);
-  }, [sessionId, getSessionById, getSessionStats, mounted]);
 
-  if (!mounted) {
+    const loadData = async () => {
+      setLoading(true);
+      await Promise.all([fetchSession(), fetchStats()]);
+      setLoading(false);
+    };
+
+    loadData();
+
+    // Poll for updates
+    const interval = setInterval(() => {
+      fetchSession();
+      fetchStats();
+    }, 2000);
+
+    return () => clearInterval(interval);
+  }, [sessionId, mounted, fetchSession, fetchStats]);
+
+  if (!mounted || loading) {
     return (
       <div className="min-h-screen bg-white flex items-center justify-center">
         <div className="text-muted-foreground">Loading...</div>
@@ -128,7 +162,7 @@ export default function WatchPage() {
         {/* Main content grid */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           <div className="lg:col-span-2 space-y-6">
-            <DualHostViewer
+            <MultiHostViewer
               sessionId={session.id}
               sessionTitle={session.title}
             />

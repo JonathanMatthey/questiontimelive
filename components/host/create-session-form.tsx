@@ -55,16 +55,26 @@ export function CreateSessionForm() {
     try {
       setHostWalletAddress(parseWalletAddress(walletAddress));
 
-      const session = createSession({
-        title: title.trim(),
-        description: description.trim(),
-        hostWalletAddress: parseWalletAddress(walletAddress),
-        questionPrice: Math.round(parseFloat(questionPrice) * 100),
-        assetCode: "USD",
-        assetScale: 2,
-        streamUrl: streamUrl.trim() || undefined,
+      // Create session via API (server-side storage)
+      const response = await fetch("/api/sessions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title: title.trim(),
+          description: description.trim(),
+          hostWalletAddress: parseWalletAddress(walletAddress),
+          questionPrice: Math.round(parseFloat(questionPrice) * 100),
+          assetCode: "USD",
+          assetScale: 2,
+          streamUrl: streamUrl.trim() || undefined,
+        }),
       });
 
+      if (!response.ok) {
+        throw new Error("Failed to create session");
+      }
+
+      const session = await response.json();
       router.push(`/host/session/${session.id}`);
     } catch (error) {
       console.error("Failed to create session:", error);
